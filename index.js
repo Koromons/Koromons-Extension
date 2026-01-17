@@ -8,8 +8,8 @@
 // @grant        GM_xmlhttpRequest
 // @connect      koromons.xyz
 // @connect      www.koromons.xyz
-// @updateURL    https://raw.githubusercontent.com/coopers1337/Koromons-Extension-Fixed/refs/heads/main/index.js
-// @downloadURL  https://raw.githubusercontent.com/coopers1337/Koromons-Extension-Fixed/refs/heads/main/index.js
+// @updateURL    https://raw.githubusercontent.com/wikihowmadzombie/Koromons-Extension/refs/heads/main/index.js
+// @downloadURL  https://raw.githubusercontent.com/wikihowmadzombie/Koromons-Extension/refs/heads/main/index.js
 // @icon         https://files.catbox.moe/cyolc9.png
 // @run-at       document-idle
 // ==/UserScript==
