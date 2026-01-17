@@ -6,6 +6,7 @@
 // @match        https://pekora.zip/*
 // @match        https://www.pekora.zip/*
 // @grant        GM_xmlhttpRequest
+// @connect      koromons.xyz
 // @connect      www.koromons.xyz
 // @updateURL    https://raw.githubusercontent.com/wikihowmadzombie/Koromons-Extension/refs/heads/main/index.js
 // @downloadURL  https://raw.githubusercontent.com/wikihowmadzombie/Koromons-Extension/refs/heads/main/index.js
@@ -20,41 +21,111 @@
   let ITEMS = [];
   let NAME_VALUE_MAP = new Map();
   let FETCHED = false;
+  let KOROMONS_PROMISE = null;
+  let ID_VALUE_MAP = new Map();
 
-  async function loadKoromons() {
-    if (FETCHED) return { ITEMS, NAME_VALUE_MAP };
-    FETCHED = true;
-    return new Promise((resolve) => {
-      try {
-        GM_xmlhttpRequest({
-          method: "GET",
-          url: API_URL,
-          headers: { Accept: "application/json" },
-          onload(res) {
-            try {
-              ITEMS = JSON.parse(res.responseText) || [];
-            } catch (e) {
-              ITEMS = [];
-              console.error("Koromons parse error", e);
-            }
-            buildNameValueMap();
-            resolve({ ITEMS, NAME_VALUE_MAP });
-          },
-          onerror(err) {
-            ITEMS = [];
-            NAME_VALUE_MAP = new Map();
-            console.error("Koromons fetch error", err);
-            resolve({ ITEMS, NAME_VALUE_MAP });
-          }
-        });
-      } catch (e) {
-        console.error("GM_xmlhttpRequest error", e);
-        ITEMS = [];
-        NAME_VALUE_MAP = new Map();
+  function buildIdValueMap() {
+  ID_VALUE_MAP.clear();
+  for (const it of ITEMS) {
+    ID_VALUE_MAP.set(
+      String(it.itemId),
+      Number.isFinite(Number(it.Value)) ? Number(it.Value) : 0
+    );
+  }
+  }
+
+function loadKoromons() {
+  // already loaded → instant return
+  if (FETCHED) {
+    return Promise.resolve({ ITEMS, NAME_VALUE_MAP });
+  }
+
+  // fetch already running → wait for same promise
+  if (KOROMONS_PROMISE) {
+    return KOROMONS_PROMISE;
+  }
+
+  // single fetch (EVER)
+  KOROMONS_PROMISE = new Promise((resolve) => {
+    GM_xmlhttpRequest({
+      method: "GET",
+      url: API_URL,
+      timeout: 15000,
+      headers: { Accept: "application/json" },
+
+      onload(res) {
+        try {
+          ITEMS = JSON.parse(res.responseText) || [];
+        } catch {
+          ITEMS = [];
+        }
+
+        NAME_VALUE_MAP.clear();
+        for (const it of ITEMS) {
+          const name = (it.Name || it.name || "").toLowerCase().trim();
+          const val = Number(it.Value);
+          if (name) NAME_VALUE_MAP.set(name, Number.isFinite(val) ? val : 0);
+        }
+        buildIdValueMap();
+        FETCHED = true;
+        KOROMONS_PROMISE = null;
         resolve({ ITEMS, NAME_VALUE_MAP });
+      },
+
+      onerror() {
+        FETCHED = true;              // IMPORTANT: stop retries
+        KOROMONS_PROMISE = null;
+        resolve({ ITEMS: [], NAME_VALUE_MAP });
+      },
+
+      ontimeout() {
+        FETCHED = true;
+        KOROMONS_PROMISE = null;
+        resolve({ ITEMS: [], NAME_VALUE_MAP });
       }
     });
-  }
+  });
+
+  return KOROMONS_PROMISE;
+}
+
+
+
+  function fetchKoromonsUserTotal(userId) {
+  return new Promise((resolve) => {
+    GM_xmlhttpRequest({
+      method: "GET",
+      url: `https://koromons.xyz/api/users/${userId}`,
+      headers: { Accept: "application/json" },
+
+      onload(res) {
+        try {
+          const json = JSON.parse(res.responseText);
+
+          const value = typeof json.totalValue === "number" ? json.totalValue : 0;
+
+          if (typeof value !== "number") {
+            resolve(null);
+            return;
+          }
+          
+          resolve(value);
+
+        } catch (e) {
+          console.error("Koromons user parse error", e);
+          resolve(null);
+        }
+      },
+
+      onerror(err) {
+        console.error("Koromons user fetch error", err);
+        resolve(null);
+      }
+    });
+  });
+}
+
+
 
   function cleanNameForLookup(name) {
     if (!name || typeof name !== "string") return "";
@@ -103,57 +174,16 @@
 
 (function () {
   "use strict";
-
-
-  const API_URL = "https://www.koromons.xyz/api/items";
-  let ITEMS = [];
-  let FETCHED = false;
-
-
-  async function loadKoromons() {
-    if (FETCHED) return ITEMS;
-    FETCHED = true;
-    return new Promise((resolve) => {
-      GM_xmlhttpRequest({
-        method: "GET",
-        url: API_URL,
-        onload(res) {
-          try {
-            ITEMS = JSON.parse(res.responseText);
-          } catch (e) {
-            ITEMS = [];
-            console.error("Koromons parse error", e);
-          }
-          resolve(ITEMS);
-        },
-        onerror(err) {
-          ITEMS = [];
-          console.error("Koromons fetch error", err);
-          resolve(ITEMS);
-        }
-      });
-    });
-  }
-
   function getKoromonValue(id) {
-    const it = ITEMS.find((i) => String(i.itemId) === String(id));
-    return it && it.Value > 0 ? it.Value : 0;
+  return ID_VALUE_MAP.get(String(id)) || 0;
   }
+
 
   /* ---------------------------
      Utilities
   --------------------------- */
   function safeText(el) {
     return el ? el.textContent.trim() : "";
-  }
-
-  function smallHash(str) {
-    let h = 2166136261 >>> 0;
-    for (let i = 0; i < str.length; i++) {
-      h ^= str.charCodeAt(i);
-      h = Math.imul(h, 16777619) >>> 0;
-    }
-    return h.toString(16);
   }
 
   function detectRoot() {
@@ -180,16 +210,22 @@
   }
 
   function getFirstClassPrefix(prefix, fallback) {
-    try {
-      const all = document.querySelectorAll("[class]");
-      for (const el of all) {
-        for (const c of Array.from(el.classList)) {
-          if (c.startsWith(prefix)) return c;
+  try {
+    const all = document.querySelectorAll("[class]");
+    for (const el of all) {
+      for (const c of el.classList) {
+
+        // exact prefix match (prefix-*)
+        if (c.startsWith(prefix + "-")) {
+          return c;
         }
+
       }
-    } catch {}
-    return fallback;
-  }
+    }
+  } catch (e) { /* ignore */ }
+  return fallback;
+}
+
 
   function formatValueShort(n) {
     if (typeof n !== "number") return String(n);
@@ -198,15 +234,13 @@
     return String(n);
   }
 
-
   function runCollectiblesInjector() {
+    const url = new URL(location.href);
+    const userId = url.searchParams.get("userId");
     if (!location.href.includes("/internal/collectibles?userId=")) return;
 
-    let TOTAL_VALUE = 0;
-
-    function computeValue(itemId, rap) {
-      const it = ITEMS.find((i) => String(i.itemId) === String(itemId));
-      return it && it.Value > 0 ? it.Value : rap;
+    function computeValue(itemId) {
+    return ID_VALUE_MAP.get(String(itemId)) || 0;
     }
 
     document.querySelectorAll(".col-6.col-md-4.col-lg-2.mb-2").forEach((card) => {
@@ -225,7 +259,6 @@
         }
 
         const val = computeValue(itemId, rap);
-        TOTAL_VALUE += val;
 
         if (!card.querySelector(".pekora-value")) {
           const p = document.createElement("p");
@@ -246,20 +279,30 @@
       }
     });
 
-    const RAPelement = [...document.querySelectorAll(".fw-bolder")].find((el) => /Total RAP/i.test(el.textContent));
-    if (RAPelement) {
-      let valEl = document.querySelector("#pekora-total-value");
-      if (!valEl) {
-        valEl = document.createElement("p");
-        valEl.id = "pekora-total-value";
-        valEl.style.color = "#00ff85";
-        valEl.style.fontWeight = "700";
-        valEl.style.marginTop = "5px";
-        RAPelement.insertAdjacentElement("afterend", valEl);
-      }
-      valEl.textContent = "Total Value: " + TOTAL_VALUE.toLocaleString();
-    }
 
+(async () => {
+  if (!userId) return;
+
+  const total = await fetchKoromonsUserTotal(userId);
+  if (typeof total !== "number") return;
+
+  const RAPelement = [...document.querySelectorAll(".fw-bolder")]
+    .find(el => /Total RAP/i.test(el.textContent));
+
+  if (!RAPelement) return;
+
+  let valEl = document.querySelector("#pekora-total-value");
+  if (!valEl) {
+    valEl = document.createElement("p");
+    valEl.id = "pekora-total-value";
+    valEl.style.color = "#00ff85";
+    valEl.style.fontWeight = "700";
+    valEl.style.marginTop = "5px";
+    RAPelement.insertAdjacentElement("afterend", valEl);
+  }
+
+  valEl.textContent = "Total Value: " + total.toLocaleString();
+})();
     insertSortBar();
   }
 
@@ -471,15 +514,14 @@
   }
 
   function buildProfileLiHTML(formatted, playerUrl, headerClass, textContainerClass, textClass) {
-    return `
-      <div class="${headerClass}">Value</div>
-      <a class="${textContainerClass}" href="${playerUrl}" target="_blank">
-        <h3 class="${textClass}" style="margin:0; font-weight:400; font-size:16px;">
-          ${formatted}
-        </h3>
-      </a>
-    `;
-  }
+  return `
+    <div class="${headerClass}">Value</div>
+    <a class="${textContainerClass}" href="${playerUrl}" target="_blank">
+      <h3 class="${textClass}">${formatted}</h3>
+    </a>
+  `;
+}
+
 
   async function runProfileInjector(retry = true) {
     const m = location.pathname.match(/^\/users\/(\d+)\/profile/);
@@ -503,7 +545,8 @@
       return;
     }
 
-    const formatted = formatValueShort(data.totalValue);
+    const value = data.totalValue;
+    const formatted = formatValueShort(value);
 
     const headerClass = getFirstClassPrefix("statHeader", "statHeader-0-2-102");
     const textContainerClass = getFirstClassPrefix("statTextContainer", "statTextContainer-0-2-104");
@@ -579,47 +622,36 @@
 
     runner();
 
-    setInterval(() => {
-      try {
-        if (location.href !== lastURL) {
-          lastURL = location.href;
-          runner();
-          return;
-        }
-        const snapshot = root.innerHTML.slice(0, 200000);
-        const h = smallHash(snapshot);
-        if (h !== lastHash) {
-          lastHash = h;
-          runner();
-        }
-      } catch (e) {
-        console.debug("watcher error", e);
-      }
-    }, 300);
+    let domDirty = true;
+
+const domObserver = new MutationObserver(() => {
+  scheduleRunner();
+  domDirty = true;
+});
+
+domObserver.observe(root, {
+  childList: true,
+  subtree: true,
+  attributes: false
+});
+
+    let scheduled = false;
+
+function scheduleRunner() {
+  if (scheduled) return;
+  scheduled = true;
+  requestAnimationFrame(() => {
+    scheduled = false;
+    runner();
+  });
+}
   }
 
   runWatcher();
 
 })();
-
-
-
-  function safeText(el) { return el ? (el.textContent || "").trim() : ""; }
-  function getFirstClassPrefix(prefix, fallback) {
-    try {
-      const all = document.querySelectorAll("[class]");
-      for (const el of all) {
-        for (const c of Array.from(el.classList)) {
-          if (c.startsWith(prefix)) return c;
-        }
-      }
-    } catch (e) { /* ignore */ }
-    return fallback;
-  }
-
-
-
-  (function injectTradeCSS() {
+  
+(function injectTradeCSS() {
 const css = `
       .pekora-trade-overlay{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:2147483600;overflow:visible}
       .pekora-value-tag{font-family:Arial,sans-serif;display:inline-block;gap:6px;font-size:13px;padding:3px 7px;border-radius:6px;background:rgba(10,10,10,0.92);color:#e6ffed;white-space:nowrap;pointer-events:auto;user-select:none;line-height:1;position:absolute;z-index:2147483650;transform:translateX(-50%);}
@@ -638,24 +670,34 @@ const css = `
     st.textContent = css;
     document.head.appendChild(st);
   })();
-
   function ensureOverlayForModal(parent) {
-    if (!parent) return null;
-    try { const cs = window.getComputedStyle(parent); if (cs.position === "static") parent.style.position = "relative"; } catch (e) {}
-    if (parent._pekora_trade_overlay && parent._pekora_trade_overlay instanceof Element) return parent._pekora_trade_overlay;
-    const ov = document.createElement("div");
-    ov.className = "pekora-trade-overlay";
-    ov.style.pointerEvents = "none";
-    ov.style.position = "absolute";
-    ov.style.top = "0";
-    ov.style.left = "0";
-    ov.style.width = "100%";
-    ov.style.height = "100%";
-    ov.style.overflow = "visible";
-    try { parent.appendChild(ov); } catch (e) { document.body.appendChild(ov); }
-    parent._pekora_trade_overlay = ov;
-    return ov;
+  if (!parent) return null;
+
+  if (parent._pekora_trade_overlay instanceof Element) {
+    return parent._pekora_trade_overlay;
   }
+
+  try {
+    const cs = window.getComputedStyle(parent);
+    if (cs.position === "static") parent.style.position = "relative";
+  } catch {}
+
+  const ov = document.createElement("div");
+  ov.className = "pekora-trade-overlay";
+  ov.style.pointerEvents = "none";
+  ov.style.position = "absolute";
+  ov.style.top = "0";
+  ov.style.left = "0";
+  ov.style.width = "100%";
+  ov.style.height = "100%";
+  ov.style.overflow = "visible";
+
+  parent.appendChild(ov);
+  parent._pekora_trade_overlay = ov;
+
+  return ov;
+}
+
 
   function ensureModalId(modal) {
     if (!modal) return "";
@@ -1053,6 +1095,7 @@ const css = `
       }
     }
   }
+  let _pekoraTradeRunning = false;
 
   async function enhanceModalIfEligible() {
     if (!/My\/Trades\.aspx/i.test(location.pathname) && !/my trades/i.test((document.body.textContent || "").toLowerCase())) {
@@ -1062,7 +1105,8 @@ const css = `
     }
 
     await loadKoromons();
-    if (!NAME_VALUE_MAP || NAME_VALUE_MAP.size === 0) buildNameValueMap();
+    if (!NAME_VALUE_MAP || NAME_VALUE_MAP.size === 0)
+    buildNameValueMap();
 
     const modal = findTradeModal();
     if (!modal) {
@@ -1081,13 +1125,7 @@ const css = `
     createOrUpdateModalSummary(modal, totals.giveTotal, totals.receiveTotal);
 
     attachModalReinserter(modal, (m) => {
-      if (m._pekora_trade_overlay) {
-        const children = Array.from(m._pekora_trade_overlay.children);
-        for (const c of children) {
-          if (c.dataset && c.dataset.pekoraModal === m._pekora_trade_id) c.remove();
-        }
-      }
-      setTimeout(() => { try { enhanceModalIfEligible(); } catch (e) {} }, 90);
+      tradeRequestReposition();
     });
 
     tradeRequestReposition();
