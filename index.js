@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Korone Trading Extension
 // @namespace    Violentmonkey Scripts
-// @version      2.0
+// @version      2.1
 // @description  Extension for trading and stuff
 // @match        https://pekora.zip/*
 // @match        https://www.pekora.zip/*
@@ -91,7 +91,7 @@ function loadKoromons() {
 
 
 
-  function fetchKoromonsUserTotal(userId) {
+  function fetchKoromonsUserStats(userId) {
   return new Promise((resolve) => {
     GM_xmlhttpRequest({
       method: "GET",
@@ -102,30 +102,28 @@ function loadKoromons() {
         try {
           const json = JSON.parse(res.responseText);
 
-          const value = typeof json.totalValue === "number" ? json.totalValue : 0;
-
-          if (typeof value !== "number") {
-            resolve(null);
-            return;
-          }
-          
-          resolve(value);
+          resolve({
+            totalValue:
+              typeof json.totalValue === "number" ? json.totalValue : 0,
+            leaderboardRank:
+              typeof json.leaderboardRank === "number"
+                ? json.leaderboardRank
+                : null
+          });
 
         } catch (e) {
           console.error("Koromons user parse error", e);
-          resolve(null);
+          resolve({ totalValue: 0, leaderboardRank: null });
         }
       },
 
       onerror(err) {
         console.error("Koromons user fetch error", err);
-        resolve(null);
+        resolve({ totalValue: 0, leaderboardRank: null });
       }
     });
   });
 }
-
-
 
   function cleanNameForLookup(name) {
     if (!name || typeof name !== "string") return "";
@@ -305,6 +303,38 @@ function loadKoromons() {
 })();
     insertSortBar();
   }
+  
+  async function injectProfileLeaderboardRank(userId) {
+  const EXISTING_ID = "pk_profile_rank_card";
+
+  // hard stop: already injected for this user
+  const existing = document.getElementById(EXISTING_ID);
+  if (existing && existing.dataset.userId === String(userId)) return;
+
+  // remove stale rank cards (from previous profiles / rerenders)
+  document.querySelectorAll(`#${EXISTING_ID}`).forEach(e => e.remove());
+
+  const dropdownBtn = [...document.querySelectorAll("[class]")]
+    .find(el => [...el.classList].some(c => c.startsWith("dropdownButton")));
+
+  if (!dropdownBtn || !dropdownBtn.parentNode) return;
+
+  const data = await fetchKoromonsUser(userId);
+  if (!data || typeof data.leaderboardRank !== "number") return;
+
+  const card = document.createElement("a");
+  card.id = EXISTING_ID;
+  card.dataset.userId = String(userId);
+  card.className = "pk-rank-card";
+  card.href = `https://www.koromons.xyz/player/${userId}`;
+  card.target = "_blank";
+  card.rel = "noopener noreferrer";
+
+  card.innerHTML = `Rank: <span class="pk-rank-num">#${data.leaderboardRank.toLocaleString()}</span>`;
+
+  dropdownBtn.parentNode.insertBefore(card, dropdownBtn);
+}
+
 
   function insertSortBar() {
     const container = document.querySelector(".container");
@@ -530,6 +560,7 @@ function loadKoromons() {
       return;
     }
     const userId = m[1];
+    injectProfileLeaderboardRank(userId);
 
     const statsList = [...document.querySelectorAll("[class]")].find((el) =>
       hasClassPrefix(el, "relationshipList")
@@ -670,6 +701,7 @@ const css = `
     st.textContent = css;
     document.head.appendChild(st);
   })();
+
   function ensureOverlayForModal(parent) {
   if (!parent) return null;
 
@@ -697,7 +729,6 @@ const css = `
 
   return ov;
 }
-
 
   function ensureModalId(modal) {
     if (!modal) return "";
@@ -1154,6 +1185,44 @@ const css = `
       }, 300);
     });
   })();
+
+  (function injectRankCardCSS() {
+  if (document.getElementById("pk-rank-card-css")) return;
+
+  const css = `
+    .pk-rank-card {
+  display: inline-flex;        /* 🔥 horizontal layout */
+  align-items: center;
+  gap: 6px;
+
+  padding: 6px 10px;
+  margin-right: 8px;
+
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+
+  background: #0f0f0f;
+  color: #f1f1f1;
+  border: 1px solid #2a2a2a;
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.45);
+
+  white-space: nowrap;        /* 🔥 prevent vertical wrapping */
+}
+
+
+   .pk-rank-num {
+      color: #ffd54f; 
+      font-weight: 800;
+    }
+  `;
+
+  const style = document.createElement("style");
+  style.id = "pk-rank-card-css";
+  style.textContent = css;
+  document.head.appendChild(style);
+})();
 
   setTimeout(() => {
     try { enhanceModalIfEligible(); } catch (e) {}
