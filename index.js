@@ -18,11 +18,42 @@
   "use strict";
 
   const API_URL = "https://www.koromons.xyz/api/items";
+  const API_BASE = "https://www.pekora.zip/apisite/users/v1/users/";
   let ITEMS = [];
   let NAME_VALUE_MAP = new Map();
   let FETCHED = false;
   let KOROMONS_PROMISE = null;
   let ID_VALUE_MAP = new Map();
+
+  async function fetchRAP(id) {
+    const r = await fetch(API_BASE + id, { credentials: "include" });
+    if (!r.ok) return null;
+    const j = await r.json();
+    return j.inventoryRap;
+  }
+
+  function getRAPNode() {
+    for (const li of document.querySelectorAll("li")) {
+      const h = li.querySelector("div");
+      if (h && h.textContent.trim() === "RAP") {
+        return li.querySelector("h3");
+      }
+    }
+    return null;
+  }
+
+  async function apply(id) {
+    if (!id) return;
+
+    const el = getRAPNode();
+    if (!el || el.dataset.done) return;
+
+    const rap = await fetchRAP(id);
+    if (typeof rap !== "number") return;
+
+    el.textContent = rap.toLocaleString();
+    el.dataset.done = "1";
+  }
 
   function buildIdValueMap() {
   ID_VALUE_MAP.clear();
@@ -303,7 +334,7 @@ function loadKoromons() {
 })();
     insertSortBar();
   }
-  
+
   async function injectProfileLeaderboardRank(userId) {
   const EXISTING_ID = "pk_profile_rank_card";
 
@@ -562,6 +593,11 @@ function loadKoromons() {
     const userId = m[1];
     injectProfileLeaderboardRank(userId);
 
+      apply(userId);
+  new MutationObserver(apply(userId)).observe(document.body, {
+    childList: true,
+    subtree: true
+  });
     const statsList = [...document.querySelectorAll("[class]")].find((el) =>
       hasClassPrefix(el, "relationshipList")
     );
@@ -681,7 +717,7 @@ function scheduleRunner() {
   runWatcher();
 
 })();
-  
+
 (function injectTradeCSS() {
 const css = `
       .pekora-trade-overlay{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:2147483600;overflow:visible}
@@ -1213,7 +1249,7 @@ const css = `
 
 
    .pk-rank-num {
-      color: #ffd54f; 
+      color: #ffd54f;
       font-weight: 800;
     }
   `;
@@ -1231,7 +1267,6 @@ const css = `
   window.addEventListener("locationchange", () => {
     try { enhanceModalIfEligible(); } catch (e) {}
   });
-
   window.__pekoraEnhancer = Object.assign(window.__pekoraEnhancer || {}, {
     reloadValues: async () => { FETCHED = false; await loadKoromons(); buildNameValueMap(); },
     reScanTrades: () => enhanceModalIfEligible(),
