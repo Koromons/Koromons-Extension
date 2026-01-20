@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Korone Trading Extension
 // @namespace    Violentmonkey Scripts
-// @version      2.1
+// @version      2.2
 // @description  Extension for trading and stuff
 // @match        https://pekora.zip/*
 // @match        https://www.pekora.zip/*
