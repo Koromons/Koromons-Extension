@@ -25,6 +25,10 @@
   let KOROMONS_PROMISE = null;
   let ID_VALUE_MAP = new Map();
 
+  function getProfileRoot() {
+    return document.querySelector("main") || document.body;
+  }
+
   async function fetchRAP(id) {
     const r = await fetch(API_BASE + id, { credentials: "include" });
     if (!r.ok) return null;
@@ -32,8 +36,8 @@
     return j.inventoryRap;
   }
 
-  function getRAPNode() {
-    for (const li of document.querySelectorAll("li")) {
+  function getRAPNode(root) {
+    for (const li of root.querySelectorAll("li")) {
       const h = li.querySelector("div");
       if (h && h.textContent.trim() === "RAP") {
         return li.querySelector("h3");
@@ -45,14 +49,21 @@
   async function apply(id) {
     if (!id) return;
 
-    const el = getRAPNode();
-    if (!el || el.dataset.done) return;
+    const root = getProfileRoot();
+    const el = getRAPNode(root);
+    if (!el) return;
+
+    if (lastUserId !== id) {
+      el.textContent = "...";
+      lastUserId = id;
+    }
+
+    if (el.textContent !== "...") return;
 
     const rap = await fetchRAP(id);
     if (typeof rap !== "number") return;
 
     el.textContent = rap.toLocaleString();
-    el.dataset.done = "1";
   }
 
   function buildIdValueMap() {
