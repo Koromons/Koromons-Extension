@@ -62,13 +62,14 @@ async function apply(id) {
     const rap = await fetchRAP(id);
     if (typeof rap !== "number") return;
 
+    if (id !== lastUserId) return;
+
     const shown = Number(el.textContent.replace(/[^\d]/g, ""));
     if (shown !== rap) el.textContent = rap.toLocaleString();
   } finally {
     rapInflight = false;
   }
 }
-
 
   function buildIdValueMap() {
   ID_VALUE_MAP.clear();
@@ -604,6 +605,7 @@ async function runProfileInjector(retry = true) {
   if (!m) {
     lastUserId = null;
     removeProfileValue();
+    document.querySelectorAll("#pk_profile_rank_card").forEach(e => e.remove());
     return;
   }
 
@@ -611,11 +613,13 @@ async function runProfileInjector(retry = true) {
 
   if (lastUserId !== userId) {
     lastUserId = userId;
-
     rapInflight = false;
     rapToken++;
 
     removeProfileValue();
+    document.querySelectorAll("#pk_profile_rank_card").forEach(e => e.remove());
+    const rapNode = getRAPNode(getProfileRoot());
+    if (rapNode) rapNode.textContent = "...";
   }
 
   injectProfileLeaderboardRank(userId);
