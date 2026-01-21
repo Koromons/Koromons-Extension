@@ -50,6 +50,13 @@
   }
 
 
+function formatValueShort(n) {
+    if (typeof n !== "number") return String(n);
+    if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, "") + "M+";
+    if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, "") + "K+";
+    return String(n);
+  }
+
 async function apply(id) {
   if (!id || rapInflight) return;
 
@@ -65,7 +72,7 @@ async function apply(id) {
     if (id !== lastUserId) return;
 
     const shown = Number(el.textContent.replace(/[^\d]/g, ""));
-    if (shown !== rap) el.textContent = rap.toLocaleString();
+    if (shown !== rap) el.textContent = formatValueShort(rap);
   } finally {
     rapInflight = false;
   }
@@ -270,14 +277,6 @@ function loadKoromons() {
   } catch (e) { /* ignore */ }
   return fallback;
 }
-
-
-  function formatValueShort(n) {
-    if (typeof n !== "number") return String(n);
-    if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, "") + "M+";
-    if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, "") + "K+";
-    return String(n);
-  }
 
   function runCollectiblesInjector() {
     const url = new URL(location.href);
