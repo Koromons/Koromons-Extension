@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Korone Trading Extension
 // @namespace    Violentmonkey Scripts
-// @version      2.1
+// @version      2.2
 // @description  Extension for trading and stuff
 // @match        https://pekora.zip/*
 // @match        https://www.pekora.zip/*
@@ -18,11 +18,65 @@
   "use strict";
 
   const API_URL = "https://www.koromons.xyz/api/items";
+  const API_BASE = "https://www.pekora.zip/apisite/users/v1/users/";
   let ITEMS = [];
   let NAME_VALUE_MAP = new Map();
   let FETCHED = false;
   let KOROMONS_PROMISE = null;
   let ID_VALUE_MAP = new Map();
+  let lastUserId = null;
+  let rapInflight = false;
+  let rapToken = 0;
+
+  function getProfileRoot() {
+    return document.querySelector("main") || document.body;
+  }
+
+  async function fetchRAP(id) {
+    const r = await fetch(API_BASE + id, { credentials: "include" });
+    if (!r.ok) return null;
+    const j = await r.json();
+    return j.inventoryRap;
+  }
+
+  function getRAPNode(root) {
+    for (const li of root.querySelectorAll("li")) {
+      const h = li.querySelector("div");
+      if (h && h.textContent.trim() === "RAP") {
+        return li.querySelector("h3");
+      }
+    }
+    return null;
+  }
+
+
+function formatValueShort(n) {
+    if (typeof n !== "number") return String(n);
+    if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, "") + "M+";
+    if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, "") + "K+";
+    return String(n);
+  }
+
+async function apply(id) {
+  if (!id || rapInflight) return;
+
+  const root = getProfileRoot();
+  const el = getRAPNode(root);
+  if (!el) return;
+
+  rapInflight = true;
+  try {
+    const rap = await fetchRAP(id);
+    if (typeof rap !== "number") return;
+
+    if (id !== lastUserId) return;
+
+    const shown = Number(el.textContent.replace(/[^\d]/g, ""));
+    if (shown !== rap) el.textContent = formatValueShort(rap);
+  } finally {
+    rapInflight = false;
+  }
+}
 
   function buildIdValueMap() {
   ID_VALUE_MAP.clear();
@@ -73,7 +127,7 @@ function loadKoromons() {
       },
 
       onerror() {
-        FETCHED = true;              // IMPORTANT: stop retries
+        FETCHED = true;
         KOROMONS_PROMISE = null;
         resolve({ ITEMS: [], NAME_VALUE_MAP });
       },
@@ -224,14 +278,6 @@ function loadKoromons() {
   return fallback;
 }
 
-
-  function formatValueShort(n) {
-    if (typeof n !== "number") return String(n);
-    if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, "") + "M+";
-    if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, "") + "K+";
-    return String(n);
-  }
-
   function runCollectiblesInjector() {
     const url = new URL(location.href);
     const userId = url.searchParams.get("userId");
@@ -281,7 +327,7 @@ function loadKoromons() {
 (async () => {
   if (!userId) return;
 
-  const total = await fetchKoromonsUserTotal(userId);
+  const total = await fetchKoromonsUserStats(userId);
   if (typeof total !== "number") return;
 
   const RAPelement = [...document.querySelectorAll(".fw-bolder")]
@@ -303,7 +349,7 @@ function loadKoromons() {
 })();
     insertSortBar();
   }
-  
+
   async function injectProfileLeaderboardRank(userId) {
   const EXISTING_ID = "pk_profile_rank_card";
 
@@ -553,15 +599,30 @@ function loadKoromons() {
 }
 
 
-  async function runProfileInjector(retry = true) {
-    const m = location.pathname.match(/^\/users\/(\d+)\/profile/);
-    if (!m) {
-      removeProfileValue();
-      return;
-    }
-    const userId = m[1];
-    injectProfileLeaderboardRank(userId);
+async function runProfileInjector(retry = true) {
+  const m = location.pathname.match(/^\/users\/(\d+)\/profile/);
+  if (!m) {
+    lastUserId = null;
+    removeProfileValue();
+    document.querySelectorAll("#pk_profile_rank_card").forEach(e => e.remove());
+    return;
+  }
 
+  const userId = m[1];
+
+  if (lastUserId !== userId) {
+    lastUserId = userId;
+    rapInflight = false;
+    rapToken++;
+
+    removeProfileValue();
+    document.querySelectorAll("#pk_profile_rank_card").forEach(e => e.remove());
+    const rapNode = getRAPNode(getProfileRoot());
+    if (rapNode) rapNode.textContent = "...";
+  }
+
+  injectProfileLeaderboardRank(userId);
+  apply(userId);
     const statsList = [...document.querySelectorAll("[class]")].find((el) =>
       hasClassPrefix(el, "relationshipList")
     );
@@ -655,6 +716,22 @@ function loadKoromons() {
 
     let domDirty = true;
 
+
+let lastProfileURL = location.href;
+
+setInterval(() => {
+  if (location.href !== lastProfileURL) {
+    lastProfileURL = location.href;
+
+    if (/^https:\/\/www\.pekora\.zip\/users\/\d+\/profile/.test(location.href)) {
+      lastUserId = null;
+      rapInflight = false;
+      removeProfileValue();
+      runProfileInjector();
+    }
+  }
+}, 300);
+
 const domObserver = new MutationObserver(() => {
   scheduleRunner();
   domDirty = true;
@@ -681,7 +758,7 @@ function scheduleRunner() {
   runWatcher();
 
 })();
-  
+
 (function injectTradeCSS() {
 const css = `
       .pekora-trade-overlay{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:2147483600;overflow:visible}
@@ -1213,7 +1290,7 @@ const css = `
 
 
    .pk-rank-num {
-      color: #ffd54f; 
+      color: #ffd54f;
       font-weight: 800;
     }
   `;
@@ -1231,7 +1308,6 @@ const css = `
   window.addEventListener("locationchange", () => {
     try { enhanceModalIfEligible(); } catch (e) {}
   });
-
   window.__pekoraEnhancer = Object.assign(window.__pekoraEnhancer || {}, {
     reloadValues: async () => { FETCHED = false; await loadKoromons(); buildNameValueMap(); },
     reScanTrades: () => enhanceModalIfEligible(),
